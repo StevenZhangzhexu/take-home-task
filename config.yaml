@@ -1,0 +1,66 @@
+day_of_month:
+  converter:
+    min_val: 1
+    max_val: 31
+    clip_oor: False
+    prefix: ""
+    suffix: ""
+    rounding: 0
+  normalizer:
+    clip: False
+    reject: True
+height:
+  converter:
+    min_val: 1
+    max_val: False
+    clip_oor: True
+    prefix: ""
+    suffix: "cm"
+    rounding: 2
+  normalizer:
+    clip: True
+    reject: False
+account_balance:
+  converter:
+    min_val: 0
+    max_val: False
+    clip_oor: True
+    prefix: "$"
+    suffix: ""
+    rounding: 2
+  normalizer:
+    clip: True
+    reject: False
+net_profit:
+  converter:
+    min_val: False
+    max_val: False
+    clip_oor: False
+    prefix: "$"
+    suffix: ""
+    rounding: 2
+  normalizer:
+    clip: True
+    reject: False
+customer_ratings:
+  converter:
+    min_val: 0.0
+    max_val: False
+    clip_oor: False
+    prefix: ""
+    suffix: "stars"
+    rounding: 2
+  normalizer:
+    clip: True
+    reject: False
+leaderboard_rank:
+  converter:
+    min_val: 1
+    max_val: True
+    clip_oor: False
+    prefix: ""
+    suffix: ""
+    rounding: 0
+  normalizer:
+    clip: True
+    reject: False
