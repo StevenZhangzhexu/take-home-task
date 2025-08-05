@@ -44,10 +44,16 @@ def compare_pipelines(config_path: str, data_path: str):
     
     # Initialize Spark
     spark = SparkSession.builder.appName("PipelineComparison").getOrCreate()
-    # spark = SparkSession.builder \
-    # .appName("PipelineComparison") \
-    # .config("spark.driver.extraJavaOptions", "--add-opens=java.base/javax.security.auth=ALL-UNNAMED") \
+    # spark = (
+    # SparkSession.builder
+    # .appName("PipelineComparison")
+    # .config("spark.default.parallelism", 300)  # More default tasks
+    # .config("spark.sql.shuffle.partitions", 300)  # For wide transformations
+    # .config("spark.driver.memory", "4g")  # Optional memory tweak
+    # .config("spark.kryoserializer.buffer.max", "512m")  # Optional serialization
     # .getOrCreate()
+    # )
+
     spark_data = pandas_to_spark_df(pandas_data, spark)
     
     print(f"Data shape: {pandas_data.shape}")
@@ -115,6 +121,21 @@ def compare_pipelines(config_path: str, data_path: str):
                 # For non-numeric columns, check exact equality
                 is_equal = pandas_col.equals(spark_col)
                 print(f"  {col}: equal = {is_equal}")
+
+    print("\nview head data...")
+    print("\nPandas transformed sample:")
+    print(pandas_transformed.head())
+
+    print("\nPandas inverse transformed sample:")
+    print(pandas_inversed.head())
+
+    print("\nSpark transformed sample:")
+    spark_transformed.show(5)
+
+    print("\nSpark inverse transformed sample:")
+    spark_inversed.show(5)
+
+
     
     print(f"\n=== Summary ===")
     print(f"Pandas pipeline time: {pandas_time:.2f} seconds")

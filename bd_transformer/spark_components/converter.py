@@ -1,6 +1,6 @@
 from typing import Union
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import col, when, lit, udf, regexp_replace, substring, length
+from pyspark.sql.functions import col, when, lit, round, substring, length
 from pyspark.sql.types import StringType, DoubleType, FloatType
 import numpy as np
 
@@ -108,19 +108,21 @@ class SparkConverter:
     def fit(self, data: DataFrame) -> "SparkConverter":
         self._column_name = data.columns[0]
         
-        # Determine data type
-        sample_row = data.select(self._column_name).limit(1).collect()[0][0]
+        # Determine data type more efficiently
+        sample_row = data.select(self._column_name).limit(1).first()[0]
         self._type = type(sample_row)
         
         # Convert string data to numbers for fitting
         if self._type == str:
             data = string_to_numbers_spark(data, self._column_name, self._prefix, self._suffix)
         
-        # Handle min_val
+        # Cache data for multiple aggregations
+        data = data.cache()
+        
         if isinstance(self._min_val, bool) and self._min_val:
-            self._min_val = data.agg({self._column_name: "min"}).collect()[0][0]
+            min_result = data.agg({self._column_name: "min"}).first()
+            self._min_val = min_result[0]
         elif isinstance(self._min_val, str):
-            # Parse string value
             if self._prefix:
                 self._min_val = self._min_val[len(self._prefix):]
             if self._suffix:
@@ -129,9 +131,9 @@ class SparkConverter:
         elif isinstance(self._min_val, bool) and not self._min_val:
             self._min_val = float('-inf')
 
-        # Handle max_val
         if isinstance(self._max_val, bool) and self._max_val:
-            self._max_val = data.agg({self._column_name: "max"}).collect()[0][0]
+            max_result = data.agg({self._column_name: "max"}).first()
+            self._max_val = max_result[0]
         elif isinstance(self._max_val, str):
             # Parse string value
             if self._prefix:
@@ -141,7 +143,9 @@ class SparkConverter:
             self._max_val = float(self._max_val)
         elif isinstance(self._max_val, bool) and not self._max_val:
             self._max_val = float('inf')
-            
+        
+        # Unpersist cached data
+        data.unpersist()
         return self
 
     def convert(self, data: DataFrame) -> DataFrame:
@@ -182,8 +186,6 @@ class SparkConverter:
                 .otherwise("")
             )
 
-        # Round the values properly
-        from pyspark.sql.functions import round
         data = data.withColumn(
             self._column_name,
             round(col(self._column_name), self._rounding)

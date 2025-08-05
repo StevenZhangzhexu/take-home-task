@@ -130,12 +130,43 @@ def test_pandas_pipeline(data_path: str, config: dict):
     }
 
 
-def test_spark_pipeline(data_path: str, config: dict):
+def test_spark_pipeline(data_path: str, config: dict, extra_confs: dict = {}):
     """Test Spark pipeline performance."""
     print("Testing Spark pipeline...")
     
     # Initialize Spark
-    spark = SparkSession.builder.appName("PerformanceTest").getOrCreate()
+    #spark = SparkSession.builder.appName("PerformanceTest").getOrCreate()
+
+    # spark = (
+    # SparkSession.builder
+    # .appName("PipelineComparison")
+    # .config("spark.default.parallelism", 100)  # More default tasks
+    # .config("spark.sql.shuffle.partitions", 100) 
+    # .config("spark.driver.memory", "4g")  # Optional memory tweak
+    # .config("spark.kryoserializer.buffer.max", "512m")  # Optional serialization
+    # .getOrCreate()
+    # )
+
+    spark = (
+        SparkSession.builder
+        .appName("PipelineComparison")
+        .config("spark.default.parallelism", 100)  # More default tasks
+        .config("spark.sql.shuffle.partitions", 100)  # For wide transformations
+        .config("spark.driver.memory", "4g")  # Optional memory tweak
+        .config("spark.kryoserializer.buffer.max", "512m")  # Optional serialization
+        .config("spark.sql.adaptive.enabled", "true")  # Enable adaptive query execution
+        .config("spark.sql.adaptive.coalescePartitions.enabled", "true")  # Coalesce partitions
+        .config("spark.sql.adaptive.skewJoin.enabled", "true")  # Handle skewed data
+        .config("spark.sql.adaptive.localShuffleReader.enabled", "true")  # Local shuffle reader
+        .getOrCreate()
+    )
+
+    # builder = SparkSession.builder.appName("PipelineComparison")
+    # for k, v in extra_confs.items():
+    #     builder = builder.config(k, v)
+    # spark = builder.getOrCreate()
+
+
     
     # Load data
     data = pd.read_parquet(data_path)
@@ -241,8 +272,11 @@ def main():
     parser.add_argument("--data_path", type=str, required=True)
     parser.add_argument("--config_path", type=str, default="config.yaml")
     parser.add_argument("--output_dir", type=str, default="results")
+    #parser.add_argument("--conf", action="append", help="Extra Spark config in key=value format") #grid
     args = parser.parse_args()
     
+    #extra_confs = dict(item.split("=", 1) for item in (args.conf or [])) #grid
+
     # Get system specs
     specs = get_system_specs()
     
@@ -251,14 +285,14 @@ def main():
         config = yaml.load(f, Loader=yaml.FullLoader)
     
     print("\n=== Performance Testing ===")
+
+    # Test Spark pipeline
+    print("\n--- Spark Pipeline ---")
+    spark_results = test_spark_pipeline(args.data_path, config, extra_confs={}) #grid
     
     # Test pandas pipeline
     print("\n--- Pandas Pipeline ---")
     pandas_results = test_pandas_pipeline(args.data_path, config)
-    
-    # Test Spark pipeline
-    print("\n--- Spark Pipeline ---")
-    spark_results = test_spark_pipeline(args.data_path, config)
     
     # Print results
     print("\n=== Results Summary ===")

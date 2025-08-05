@@ -30,16 +30,21 @@ class SparkNormalizer:
     def fit(self, data: DataFrame) -> "SparkNormalizer":
         self._column_name = data.columns[0]
         
-        # Calculate min and max
-        stats = data.agg(
-            spark_min(self._column_name).alias("min_val"),
-            spark_max(self._column_name).alias("max_val")
-        ).collect()[0]
+        # Cache data for multiple aggregations
+        data = data.cache()
         
-        self._min = stats["min_val"]
-        self._max = stats["max_val"]
+        # Calculate min and max using .first() instead of .collect()
+        min_result = data.agg(spark_min(self._column_name)).first()
+        max_result = data.agg(spark_max(self._column_name)).first()
+        
+        # Ensure consistent precision with pandas and use efficient data types
+        self._min = float(min_result[0]) if min_result[0] is not None else 0.0
+        self._max = float(max_result[0]) if max_result[0] is not None else 1.0
         self._scale = self._max - self._min
-        self._scale = 1 if self._scale == 0 else self._scale
+        self._scale = 1.0 if self._scale == 0 else self._scale
+        
+        # Unpersist cached data
+        data.unpersist()
         return self
 
     def normalize(self, data: DataFrame) -> DataFrame:
@@ -51,6 +56,7 @@ class SparkNormalizer:
                 .otherwise(col(self._column_name))
             )
         
+        # No rounding here - match pandas behavior exactly
         data = data.withColumn(
             self._column_name,
             (col(self._column_name) - self._min) / self._scale
@@ -83,7 +89,7 @@ class SparkNormalizer:
                 .otherwise("")
             )
         
-        # inverse
+        # No rounding here - match pandas behavior exactly
         data = data.withColumn(
             self._column_name,
             (col(self._column_name) * self._scale) + self._min
