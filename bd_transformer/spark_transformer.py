@@ -50,6 +50,9 @@ class SparkTransformer:
                 }
         
         # Process all columns using the collected statistics
+        # Create mapping from column names to their indices in sample_data
+        col_to_index = {col_name: i for i, col_name in enumerate(self.config.keys())}
+        
         for col_name in self.config:
             # Create converter with extracted statistics
             conv_config = self.config[col_name].get("converter", {}).copy()
@@ -60,25 +63,62 @@ class SparkTransformer:
             if col_name in numeric_cols and conv_config.get('max_val') is True:
                 conv_config['max_val'] = all_stats[col_name]['max']
             
-            self.converters[col_name] = SparkConverter(
-                **conv_config,
-                spark=self.spark
-            ).fit(data.select(col_name))
+            # Create converter and set attributes directly (no Spark operations)
+            converter = SparkConverter(**conv_config, spark=self.spark)
+            converter._type = type(sample_data[col_to_index[col_name]])  # Use the type we already determined
+            converter._column_name = col_name
             
-            # Convert the column to get the range for normalizer
-            converted = self.converters[col_name].convert(data.select(col_name))
+            # Handle min_val parsing (same logic as original fit method)
+            if isinstance(converter._min_val, bool) and converter._min_val:
+                converter._min_val = all_stats[col_name]['min']
+            elif isinstance(converter._min_val, str):
+                if converter._prefix:
+                    converter._min_val = converter._min_val[len(converter._prefix):]
+                if converter._suffix:
+                    converter._min_val = converter._min_val[:-len(converter._suffix)]
+                converter._min_val = float(converter._min_val)
+            elif isinstance(converter._min_val, bool) and not converter._min_val:
+                converter._min_val = float('-inf')
             
-            # Create normalizer with extracted statistics
+            # Handle max_val parsing (same logic as original fit method)
+            if isinstance(converter._max_val, bool) and converter._max_val:
+                converter._max_val = all_stats[col_name]['max']
+            elif isinstance(converter._max_val, str):
+                if converter._prefix:
+                    converter._max_val = converter._max_val[len(converter._prefix):]
+                if converter._suffix:
+                    converter._max_val = converter._max_val[:-len(converter._suffix)]
+                converter._max_val = float(converter._max_val)
+            elif isinstance(converter._max_val, bool) and not converter._max_val:
+                converter._max_val = float('inf')
+            
+            self.converters[col_name] = converter
+            
+            # Create normalizer and set attributes directly (no Spark operations)
             norm_config = self.config[col_name].get("normalizer", {}).copy()
+            normalizer = SparkNormalizer(**norm_config, spark=self.spark)
+            normalizer._column_name = col_name
             
-            # Remove min/max from config since SparkNormalizer calculates these during fit()
-            norm_config.pop('min', None)
-            norm_config.pop('max', None)
+            # Use the statistics we already collected for normalizer
+            if col_name in numeric_cols:
+                normalizer._min = float(all_stats[col_name]['min'])
+                normalizer._max = float(all_stats[col_name]['max'])
+                normalizer._scale = normalizer._max - normalizer._min
+                normalizer._scale = 1.0 if normalizer._scale == 0 else normalizer._scale
+            else:
+                # For string columns, we need to convert first to get numeric range
+                # This is the only Spark operation we can't avoid for string columns
+                converted = self.converters[col_name].convert(data.select(col_name))
+                converted_stats = converted.agg(
+                    spark_min(col_name).alias('min'),
+                    spark_max(col_name).alias('max')
+                ).collect()[0]
+                normalizer._min = float(converted_stats['min']) if converted_stats['min'] is not None else 0.0
+                normalizer._max = float(converted_stats['max']) if converted_stats['max'] is not None else 1.0
+                normalizer._scale = normalizer._max - normalizer._min
+                normalizer._scale = 1.0 if normalizer._scale == 0 else normalizer._scale
             
-            self.normalizers[col_name] = SparkNormalizer(
-                **norm_config,
-                spark=self.spark
-            ).fit(converted)
+            self.normalizers[col_name] = normalizer
         
         return self
 
