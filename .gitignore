@@ -213,3 +213,6 @@ __marimo__/
 data/*
 !data/small/
 !data/small/001.parquet
+
+# temp
+results/*
