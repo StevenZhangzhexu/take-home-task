@@ -18,20 +18,21 @@ This project implements a distributed data transformation pipeline using Apache 
 ├── compare_pipelines.py     # Comparison script
 ├── generate_large_dataset.py # Large dataset generator
 ├── performance_test.py      # Performance testing script
-└── IMPLEMENTATION_NOTES.md  # Detailed implementation notes
+└── PROJECT_README.md        # Detailed implementation notes
+└── requirements.txt.        # for conda env
 ```
 
-## Installation
+## Setup
 
-1. **Install the package in development mode:**
+**Install the package in a new environment:**
    ```bash
-   pip install -e .
+   conda create spark
+   conda activate spark
+   pip install -r requirements.txt
+   export PYSPARK_PYTHON=$(which python)
+   export PYSPARK_DRIVER_PYTHON=$(which python)
    ```
 
-2. **Install additional dependencies:**
-   ```bash
-   pip install psutil matplotlib
-   ```
 
 ## Quick Start
 
@@ -42,7 +43,7 @@ This project implements a distributed data transformation pipeline using Apache 
 python run.py --config_path config.yaml --data_path data/small/001.parquet
 ```
 
-### Step 2: Compare Pandas vs Spark
+### Step 2: Compare Pandas vs Spark (on small dataset)
 
 ```bash
 # Compare pandas and Spark implementations
@@ -55,99 +56,59 @@ python compare_pipelines.py --config_path config.yaml --data_path data/small/001
 # Generate a dataset 20x larger than your system memory
 python generate_large_dataset.py --output_path data/large/ --memory_multiplier 20.0
 ```
+In my case:
+* Available Memory: 0.30 GB
+* large data original size = 0.3 x 20 GB = 6144 MB
+* large data in parquet format = 392MB
 
-### Step 4: Performance Testing
+### Step 4: Performance Testing (for large data)
 
 ```bash
 # Test performance on large dataset
 python performance_test.py --data_path data/large/ --config_path config.yaml --output_dir results/
 ```
 
-## Detailed Usage
 
-### 1. Spark Transformer Usage
+##  Airflow Pipeline Usage
 
-```python
-from pyspark.sql import SparkSession
-from bd_transformer.spark_transformer import SparkTransformer
-import yaml
 
-# Initialize Spark
-spark = SparkSession.builder.appName("BDTransformer").getOrCreate()
-
-# Load configuration
-with open("config.yaml", "r") as f:
-    config = yaml.safe_load(f)
-
-# Load data
-data = spark.read.parquet("data/large/")
-
-# Create and fit transformer
-transformer = SparkTransformer(config, spark)
-transformer.fit(data)
-
-# Transform data
-transformed = transformer.transform(data)
-
-# Inverse transform
-inversed = transformer.inverse_transform(transformed)
-```
-
-### 2. Airflow Pipeline Usage
-
-1. **Set up Airflow:**
    ```bash
-   # Install Airflow
-   pip install apache-airflow[spark]
-   
-   # Initialize Airflow database
-   airflow db init
-   
-   # Start Airflow webserver
-   airflow webserver --port 8080
-   
-   # Start Airflow scheduler
-   airflow scheduler
+   export AIRFLOW_HOME=~/airflow
+mkdir -p $AIRFLOW_HOME/dags
+cp airflow_dags/* $AIRFLOW_HOME/dags/
+
+airflow standalone
    ```
+then trigger task from Airflow UI
 
-2. **Copy DAG files:**
-   ```bash
-   cp airflow_dags/* $AIRFLOW_HOME/dags/
-   ```
 
-3. **Trigger the pipeline:**
-   ```bash
-   airflow dags trigger spark_transformer_pipeline \
-     --conf '{"config_path": "config.yaml", "data_path": "data/large/", "output_path": "results/"}'
-   ```
 
-## Configuration
 
-The `config.yaml` file defines the transformation parameters for each column:
+## Performance Testing & Comparison
 
-```yaml
-day_of_month:
-  converter:
-    min_val: 1
-    max_val: 31
-    clip_oor: False
-    prefix: ""
-    suffix: ""
-    rounding: 0
-  normalizer:
-    clip: False
-    reject: True
-# ... more columns
-```
-
-## Performance Testing
-
-The performance testing script provides comprehensive benchmarking:
 
 1. **System Specifications**: CPU, memory, and disk information
-2. **Resource Monitoring**: CPU, memory, and disk I/O usage over time
-3. **Performance Comparison**: Pandas vs Spark execution times
-4. **Visualization**: Performance plots saved to `results/` directory
+   ```
+   Total Memory: 8.00 GB
+   Available Memory: 0.30 GB
+   CPU Count: 8
+   CPU Frequency: 2400.00 MHz
+   ```
+2. **Performance Comparison**: Pandas vs Spark execution times
+   ```
+   Pandas Pipeline:
+   Fit time: 58.98 seconds
+   Transform time: 31.50 seconds
+   Inverse time: 124.74 seconds
+   Total time: 215.22 seconds
+
+   Spark Pipeline:
+   Fit time: 32.30 seconds
+   Transform time: 22.73 seconds
+   Inverse time: 33.22 seconds
+   Total time: 88.25 seconds
+   ```
+4. **Resource Monitoring & Visualization**: CPU, memory, and disk I/O usage over time and Performance plots saved to `results/` directory
 
 ### Running Performance Tests
 
@@ -175,43 +136,19 @@ The comparison script outputs:
 - Performance speedup metrics
 
 ### 3. Airflow Pipeline Results
+WIP
 
-- **Task Status**: Individual task success/failure status
-- **Execution Logs**: Detailed logs for each pipeline step
-- **XCom Data**: Parameter passing between tasks
 
 ## Troubleshooting
+### Airflow - WIP
+Error Log
+   ```
+   Log message source details: sources=["/Users/zhangzhexu/airflow/logs/dag_id=spark_pipeline_with_monitoring/run_id=manual__2025-08-06T10:37:32.085486+00:00/task_id=run_spark_pipeline/attempt=1.log"]
+::group::Log message source details: sources=["/Users/zhangzhexu/airflow/logs/dag_id=spark_pipeline_with_monitoring/run_id=manual__2025-08-06T10:37:32.085486+00:00/task_id=run_spark_pipeline/attempt=1.log"]
+[2025-08-06, 18:37:41] ERROR - Process terminated by signal: signal=-10: signal_name="SIGBUS": source="task"
+   ```
 
-### Common Issues
 
-1. **Memory Issues**: If you encounter memory errors:
-   - Reduce the `memory_multiplier` in `generate_large_dataset.py`
-   - Increase Spark executor memory settings
-   - Use smaller chunk sizes in data generation
-
-2. **Spark Connection Issues**: If Spark fails to start:
-   - Check Java installation (Spark requires Java 8+)
-   - Verify SPARK_HOME environment variable
-   - Check available memory and CPU resources
-
-3. **Airflow Issues**: If Airflow tasks fail:
-   - Check Airflow logs in `$AIRFLOW_HOME/logs/`
-   - Verify DAG file syntax
-   - Check XCom data passing between tasks
-
-4. **Spark Data Type Issues**: If you encounter data type mismatch errors:
-   - The Spark converter now uses `concat()` function for string concatenation
-   - Test with `test_spark_fix.py` to verify the fix works
-   - Check that string columns are properly handled with prefix/suffix
-
-### Debug Mode
-
-Enable debug logging:
-
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-```
 
 ## Development
 
@@ -222,27 +159,5 @@ logging.basicConfig(level=logging.DEBUG)
 3. **Update Airflow DAG** if needed for new columns
 4. **Run performance tests** to ensure scalability
 
-### Extending the Pipeline
 
-1. **New Transformers**: Add new transformer classes in `spark_components/`
-2. **New Operations**: Extend the SparkTransformer class
-3. **New Airflow Tasks**: Add tasks to the DAG files
-4. **Testing**: Update comparison and performance scripts
 
-## Contributing
-
-1. **Code Style**: Follow PEP 8 guidelines
-2. **Testing**: Add tests for new functionality
-3. **Documentation**: Update documentation for new features
-4. **Performance**: Ensure new code doesn't degrade performance
-
-## License
-
-This project is for educational and evaluation purposes.
-
-## Support
-
-For questions or issues:
-1. Check the `IMPLEMENTATION_NOTES.md` for detailed explanations
-2. Review the troubleshooting section above
-3. Check the Airflow and Spark documentation for framework-specific issues 
