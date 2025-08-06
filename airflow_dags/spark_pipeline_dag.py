@@ -2,6 +2,10 @@
 import sys
 sys.path.append('/Users/zhangzhexu/Downloads/take-home-task')
 
+import os
+python_bin = os.popen("which python").read().strip()
+print(python_bin)
+
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from datetime import datetime, timedelta
@@ -11,7 +15,6 @@ from pyspark.sql import SparkSession
 from bd_transformer.spark_transformer import SparkTransformer
 from performance_monitor import RealTimeMonitor
 import time
-import os
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -72,6 +75,8 @@ def run_pipeline(**kwargs):
     spark = (
         SparkSession.builder
         .appName("AirflowSparkPipeline")
+        .config("spark.pyspark.python", python_bin)
+        .config("spark.pyspark.driver.python", python_bin)
         .config("spark.default.parallelism", 150)
         .config("spark.sql.shuffle.partitions", 120)
         .config("spark.driver.memory", "8g")
@@ -95,9 +100,6 @@ def run_pipeline(**kwargs):
         logger.info(f"DataFrame row count: {spark_df.count()}")
         logger.info(f"DataFrame column count: {len(spark_df.columns)}")
 
-        logger.info("Converting to Spark DataFrame...")
-        spark_df = pandas_to_spark_df(data, spark)
-        logger.info(f"DataFrame shape: {data.shape}")
         print_memory()
 
         logger.info("Initializing transformer...")
@@ -180,7 +182,7 @@ with dag:
             'data_path': '/Users/zhangzhexu/Downloads/take-home-task/data/large/',
             'config_path': '/Users/zhangzhexu/Downloads/take-home-task/config.yaml',
             'output_dir': '/Users/zhangzhexu/Downloads/take-home-task/results'
-        }
+        },
     )
 
     pipeline_task

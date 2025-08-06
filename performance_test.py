@@ -183,9 +183,8 @@ def test_spark_pipeline_enhanced(data_path: str, config: dict, output_dir: str =
         print(f"Warning: Could not get Spark UI URL: {e}")
     
     # Load data
-    data = pd.read_parquet(data_path)
-    spark_data = pandas_to_spark_df(data, spark)
-    print(f"Data shape: {data.shape}")
+    spark_data = spark.read.parquet(data_path)
+    data_shape = (spark_data.count(),len(spark_data.columns))
     
     # Create transformer
     transformer = SparkTransformer(config, spark)
@@ -307,7 +306,7 @@ def test_spark_pipeline_enhanced(data_path: str, config: dict, output_dir: str =
         'fit_metrics': fit_metrics,
         'transform_metrics': transform_metrics,
         'inverse_metrics': inverse_metrics,
-        'data_shape': data.shape,
+        'data_shape': data_shape,
         'transformed_count': transformed_count,
         'inversed_count': inversed_count,
         'spark_metrics': spark_metrics,

@@ -96,17 +96,18 @@ then trigger task from Airflow UI
    ```
 2. **Performance Comparison**: Pandas vs Spark execution times
    ```
+   === Results Summary ===
    Pandas Pipeline:
-   Fit time: 58.98 seconds
-   Transform time: 31.50 seconds
-   Inverse time: 124.74 seconds
-   Total time: 215.22 seconds
+   Fit time: 36.01 seconds
+   Transform time: 20.29 seconds
+   Inverse time: 73.71 seconds
+   Total time: 130.02 seconds
 
    Spark Pipeline:
-   Fit time: 32.30 seconds
-   Transform time: 22.73 seconds
-   Inverse time: 33.22 seconds
-   Total time: 88.25 seconds
+   Fit time: 23.90 seconds
+   Transform time: 15.64 seconds
+   Inverse time: 15.14 seconds
+   Total time: 54.68 seconds
    ```
 4. **Resource Monitoring & Visualization**: CPU, memory, and disk I/O usage over time and Performance plots saved to `results/` directory
 
