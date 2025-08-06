@@ -8,7 +8,7 @@ from bd_transformer.spark_components.normalizer import SparkNormalizer
 
 class SparkTransformer:
     """
-    Spark-based transformer
+    Spark-based transformer - Optimized version with merged column processing
     """
     def __init__(self, config: dict, spark: SparkSession = None):
         self.config = config
@@ -31,44 +31,64 @@ class SparkTransformer:
             else:
                 numeric_cols.append(col_name)
         
-        # Collect statistics only for numeric columns in single operation
-        agg_exprs = []
+        # OPTIMIZATION: Single Spark job for all column statistics (numeric + string)
+        all_stats = {}
+        all_agg_exprs = []
+        
+        # Add numeric column expressions directly
         for col_name in numeric_cols:
-            agg_exprs.extend([
+            all_agg_exprs.extend([
                 spark_min(col_name).alias(f"{col_name}_min"),
                 spark_max(col_name).alias(f"{col_name}_max")
             ])
         
-        # Single Spark job for all numeric statistics
-        all_stats = {}
-        if agg_exprs:
-            stats_result = data.agg(*agg_exprs).collect()[0]
-            for col_name in numeric_cols:
+        # Add string column expressions with conversion
+        for col_name in string_cols:
+            conv_config = self.config[col_name].get("converter", {})
+            col_expr = col(col_name)
+            
+            # Apply string-to-number conversion inline
+            if conv_config.get('prefix'):
+                col_expr = substring(col_expr, len(conv_config['prefix']) + 1, length(col_expr))
+            if conv_config.get('suffix'):
+                col_expr = substring(col_expr, 1, length(col_expr) - len(conv_config['suffix']))
+            col_expr = col_expr.cast(DoubleType())
+            
+            all_agg_exprs.extend([
+                spark_min(col_expr).alias(f"{col_name}_min"),
+                spark_max(col_expr).alias(f"{col_name}_max")
+            ])
+        
+        # Single Spark job for all statistics
+        if all_agg_exprs:
+            stats_result = data.agg(*all_agg_exprs).collect()[0]
+            
+            # Store statistics for all columns
+            for col_name in self.config.keys():
                 all_stats[col_name] = {
                     'min': stats_result[f"{col_name}_min"],
                     'max': stats_result[f"{col_name}_max"]
                 }
         
         # Process all columns using the collected statistics
-        # Create mapping from column names to their indices in sample_data
         col_to_index = {col_name: i for i, col_name in enumerate(self.config.keys())}
         
         for col_name in self.config:
             # Create converter with extracted statistics
             conv_config = self.config[col_name].get("converter", {}).copy()
             
-            # Use empirical min/max if specified as True and column is numeric
-            if col_name in numeric_cols and conv_config.get('min_val') is True:
+            # Use empirical min/max if specified as True
+            if conv_config.get('min_val') is True:
                 conv_config['min_val'] = all_stats[col_name]['min']
-            if col_name in numeric_cols and conv_config.get('max_val') is True:
+            if conv_config.get('max_val') is True:
                 conv_config['max_val'] = all_stats[col_name]['max']
             
             # Create converter and set attributes directly (no Spark operations)
             converter = SparkConverter(**conv_config, spark=self.spark)
-            converter._type = type(sample_data[col_to_index[col_name]])  # Use the type we already determined
+            converter._type = type(sample_data[col_to_index[col_name]])
             converter._column_name = col_name
             
-            # Handle min_val parsing (same logic as original fit method)
+            # Handle min_val parsing
             if isinstance(converter._min_val, bool) and converter._min_val:
                 converter._min_val = all_stats[col_name]['min']
             elif isinstance(converter._min_val, str):
@@ -80,7 +100,7 @@ class SparkTransformer:
             elif isinstance(converter._min_val, bool) and not converter._min_val:
                 converter._min_val = float('-inf')
             
-            # Handle max_val parsing (same logic as original fit method)
+            # Handle max_val parsing
             if isinstance(converter._max_val, bool) and converter._max_val:
                 converter._max_val = all_stats[col_name]['max']
             elif isinstance(converter._max_val, str):
@@ -94,29 +114,16 @@ class SparkTransformer:
             
             self.converters[col_name] = converter
             
-            # Create normalizer and set attributes directly (no Spark operations)
+            # Create normalizer and set attributes directly
             norm_config = self.config[col_name].get("normalizer", {}).copy()
             normalizer = SparkNormalizer(**norm_config, spark=self.spark)
             normalizer._column_name = col_name
             
-            # Use the statistics we already collected for normalizer
-            if col_name in numeric_cols:
-                normalizer._min = float(all_stats[col_name]['min'])
-                normalizer._max = float(all_stats[col_name]['max'])
-                normalizer._scale = normalizer._max - normalizer._min
-                normalizer._scale = 1.0 if normalizer._scale == 0 else normalizer._scale
-            else:
-                # For string columns, we need to convert first to get numeric range
-                # This is the only Spark operation we can't avoid for string columns
-                converted = self.converters[col_name].convert(data.select(col_name))
-                converted_stats = converted.agg(
-                    spark_min(col_name).alias('min'),
-                    spark_max(col_name).alias('max')
-                ).collect()[0]
-                normalizer._min = float(converted_stats['min']) if converted_stats['min'] is not None else 0.0
-                normalizer._max = float(converted_stats['max']) if converted_stats['max'] is not None else 1.0
-                normalizer._scale = normalizer._max - normalizer._min
-                normalizer._scale = 1.0 if normalizer._scale == 0 else normalizer._scale
+            # Use the statistics we already collected
+            normalizer._min = float(all_stats[col_name]['min'])
+            normalizer._max = float(all_stats[col_name]['max'])
+            normalizer._scale = normalizer._max - normalizer._min
+            normalizer._scale = 1.0 if normalizer._scale == 0 else normalizer._scale
             
             self.normalizers[col_name] = normalizer
         

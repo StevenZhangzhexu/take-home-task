@@ -8,7 +8,6 @@ from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
 import matplotlib.pyplot as plt
 import numpy as np
-from performance_monitor import monitor_pipeline_with_spark, RealTimeMonitor
 
 from bd_transformer.transformer import Transformer
 from bd_transformer.spark_transformer import SparkTransformer
@@ -148,20 +147,6 @@ def test_spark_pipeline(data_path: str, config: dict, extra_confs: dict = {}):
     # .getOrCreate()
     # )
 
-    # spark = (
-    #     SparkSession.builder
-    #     .master("local[*]") # for test on my laptop only - improve CPU usage
-    #     .appName("PipelineComparison")
-    #     .config("spark.default.parallelism", 24)  # 100 - More default tasks
-    #     .config("spark.sql.shuffle.partitions", 200)  # For wide transformations
-    #     .config("spark.driver.memory", "4g")  # Optional memory tweak
-    #     .config("spark.kryoserializer.buffer.max", "512m")  # Optional serialization
-    #     .config("spark.sql.adaptive.enabled", "true")  # Enable adaptive query execution
-    #     .config("spark.sql.adaptive.coalescePartitions.enabled", "true")  # Coalesce partitions
-    #     .config("spark.sql.adaptive.skewJoin.enabled", "true")  # Handle skewed data
-    #     .config("spark.sql.adaptive.localShuffleReader.enabled", "true")  # Local shuffle reader
-    #     .getOrCreate()
-    # )
 
     spark = (
         SparkSession.builder
@@ -177,6 +162,7 @@ def test_spark_pipeline(data_path: str, config: dict, extra_confs: dict = {}):
         .config("spark.sql.adaptive.localShuffleReader.enabled", "true")
         .getOrCreate()
     )
+
 
     # builder = SparkSession.builder.appName("PipelineComparison")
     # for k, v in extra_confs.items():
@@ -233,125 +219,6 @@ def test_spark_pipeline(data_path: str, config: dict, extra_confs: dict = {}):
         'inverse_metrics': inverse_metrics
     }
 
-def test_spark_pipeline_enhanced(data_path: str, config: dict, extra_confs: dict = {}):
-    """Enhanced Spark pipeline test with real-time monitoring."""
-    
-    # Initialize Spark with monitoring
-    spark = (
-        SparkSession.builder
-        .master("local[*]")
-        .appName("EnhancedPipelineTest")
-        .config("spark.default.parallelism", 150)
-        .config("spark.sql.shuffle.partitions", 120)
-        .config("spark.driver.memory", "4g")
-        .config("spark.kryoserializer.buffer.max", "512m")
-        .config("spark.sql.adaptive.enabled", "true")
-        .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
-        .config("spark.sql.adaptive.skewJoin.enabled", "true")
-        .config("spark.sql.adaptive.localShuffleReader.enabled", "true")
-        .getOrCreate()
-    )
-    
-    # Load data
-    data = pd.read_parquet(data_path)
-    spark_data = pandas_to_spark_df(data, spark)
-    print(f"Data shape: {data.shape}")
-    
-    # Create transformer
-    transformer = SparkTransformer(config, spark)
-    
-    # Start continuous monitoring for the entire pipeline
-    print("Starting continuous monitoring...")
-    continuous_monitor = RealTimeMonitor(output_file="continuous_metrics.json")
-    continuous_monitor.start_monitoring()
-    
-    # Monitor fit operation
-    print("Fitting transformer...")
-    fit_start_time = time.time()
-    
-    transformer.fit(spark_data)
-    
-    fit_time = time.time() - fit_start_time
-    print(f"Fit time: {fit_time:.2f} seconds")
-    
-    # Monitor transform operation
-    print("Transforming data...")
-    transform_start_time = time.time()
-    
-    transformed = transformer.transform(spark_data)
-    
-    # Force execution by calling count() to ensure the transformation actually happens
-    print("Forcing transform execution...")
-    transformed_count = transformed.count()
-    
-    transform_time = time.time() - transform_start_time
-    print(f"Transform time (including execution): {transform_time:.2f} seconds")
-    
-    # Monitor inverse transform operation
-    print("Inverse transforming data...")
-    inverse_start_time = time.time()
-    
-    inversed = transformer.inverse_transform(transformed)
-    
-    # Force execution by calling count() to ensure the inverse transformation actually happens
-    print("Forcing inverse transform execution...")
-    inversed_count = inversed.count()
-    
-    inverse_time = time.time() - inverse_start_time
-    print(f"Inverse transform time (including execution): {inverse_time:.2f} seconds")
-    
-    # Stop continuous monitoring
-    continuous_monitor.stop_monitoring()
-    
-    # Clean up
-    spark.stop()
-    
-    # Split continuous metrics into phases based on timing
-    continuous_metrics = continuous_monitor.metrics
-    total_duration = continuous_metrics['timestamps'][-1] if continuous_metrics['timestamps'] else 0
-    
-    # Calculate phase boundaries
-    fit_end_time = fit_time
-    transform_end_time = fit_time + transform_time
-    inverse_end_time = fit_time + transform_time + inverse_time
-    
-    # Split metrics into phases
-    def split_metrics_by_phase(metrics, phase_start, phase_end):
-        """Split continuous metrics into a specific phase."""
-        phase_metrics = {
-            'timestamps': [],
-            'cpu_usage': [],
-            'memory_usage': [],
-            'disk_io': [],
-            'network_io': [],
-            'process_metrics': []
-        }
-        
-        for i, timestamp in enumerate(metrics['timestamps']):
-            if phase_start <= timestamp <= phase_end:
-                for key in phase_metrics:
-                    if key in metrics and i < len(metrics[key]):
-                        phase_metrics[key].append(metrics[key][i])
-        
-        return phase_metrics
-    
-    # Split metrics into phases
-    fit_metrics = split_metrics_by_phase(continuous_metrics, 0, fit_end_time)
-    transform_metrics = split_metrics_by_phase(continuous_metrics, fit_end_time, transform_end_time)
-    inverse_metrics = split_metrics_by_phase(continuous_metrics, transform_end_time, inverse_end_time)
-    
-    # Return results in the same format as original test
-    return {
-        'fit_time': fit_time,
-        'transform_time': transform_time,
-        'inverse_time': inverse_time,
-        'fit_metrics': fit_metrics,
-        'transform_metrics': transform_metrics,
-        'inverse_metrics': inverse_metrics,
-        'data_shape': data.shape,
-        'transformed_count': transformed_count,
-        'inversed_count': inversed_count
-    }
 
 def plot_metrics(pandas_results, spark_results, output_dir="results"):
     """Plot resource usage metrics."""
@@ -361,22 +228,20 @@ def plot_metrics(pandas_results, spark_results, output_dir="results"):
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     
     # Pandas metrics
-    for i, (operation, metrics) in enumerate([('fit', pandas_results.get('fit_metrics', {})), 
-                                            ('transform', pandas_results.get('transform_metrics', {})), 
-                                            ('inverse', pandas_results.get('inverse_metrics', {}))]):
-        if metrics and 'timestamps' in metrics and 'cpu_usage' in metrics:
-            axes[0, i].plot(metrics['timestamps'], metrics['cpu_usage'], label='CPU %', color='blue')
-            axes[0, i].set_title(f'Pandas {operation.capitalize()} - CPU Usage')
-            axes[0, i].set_xlabel('Time (s)')
-            axes[0, i].set_ylabel('CPU Usage (%)')
-            axes[0, i].grid(True)
+    for i, (operation, metrics) in enumerate([('fit', pandas_results['fit_metrics']), 
+                                            ('transform', pandas_results['transform_metrics']), 
+                                            ('inverse', pandas_results['inverse_metrics'])]):
+        axes[0, i].plot(metrics['timestamps'], metrics['cpu_usage'], label='CPU %', color='blue')
+        axes[0, i].set_title(f'Pandas {operation.capitalize()} - CPU Usage')
+        axes[0, i].set_xlabel('Time (s)')
+        axes[0, i].set_ylabel('CPU Usage (%)')
+        axes[0, i].grid(True)
         
-        if metrics and 'timestamps' in metrics and 'memory_usage' in metrics:
-            axes[1, i].plot(metrics['timestamps'], metrics['memory_usage'], label='Memory %', color='red')
-            axes[1, i].set_title(f'Pandas {operation.capitalize()} - Memory Usage')
-            axes[1, i].set_xlabel('Time (s)')
-            axes[1, i].set_ylabel('Memory Usage (%)')
-            axes[1, i].grid(True)
+        axes[1, i].plot(metrics['timestamps'], metrics['memory_usage'], label='Memory %', color='red')
+        axes[1, i].set_title(f'Pandas {operation.capitalize()} - Memory Usage')
+        axes[1, i].set_xlabel('Time (s)')
+        axes[1, i].set_ylabel('Memory Usage (%)')
+        axes[1, i].grid(True)
     
     plt.tight_layout()
     plt.savefig(f"{output_dir}/pandas_metrics.png", dpi=300, bbox_inches='tight')
@@ -385,22 +250,20 @@ def plot_metrics(pandas_results, spark_results, output_dir="results"):
     # Spark metrics
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     
-    for i, (operation, metrics) in enumerate([('fit', spark_results.get('fit_metrics', {})), 
-                                            ('transform', spark_results.get('transform_metrics', {})), 
-                                            ('inverse', spark_results.get('inverse_metrics', {}))]):
-        if metrics and 'timestamps' in metrics and 'cpu_usage' in metrics:
-            axes[0, i].plot(metrics['timestamps'], metrics['cpu_usage'], label='CPU %', color='blue')
-            axes[0, i].set_title(f'Spark {operation.capitalize()} - CPU Usage')
-            axes[0, i].set_xlabel('Time (s)')
-            axes[0, i].set_ylabel('CPU Usage (%)')
-            axes[0, i].grid(True)
+    for i, (operation, metrics) in enumerate([('fit', spark_results['fit_metrics']), 
+                                            ('transform', spark_results['transform_metrics']), 
+                                            ('inverse', spark_results['inverse_metrics'])]):
+        axes[0, i].plot(metrics['timestamps'], metrics['cpu_usage'], label='CPU %', color='blue')
+        axes[0, i].set_title(f'Spark {operation.capitalize()} - CPU Usage')
+        axes[0, i].set_xlabel('Time (s)')
+        axes[0, i].set_ylabel('CPU Usage (%)')
+        axes[0, i].grid(True)
         
-        if metrics and 'timestamps' in metrics and 'memory_usage' in metrics:
-            axes[1, i].plot(metrics['timestamps'], metrics['memory_usage'], label='Memory %', color='red')
-            axes[1, i].set_title(f'Spark {operation.capitalize()} - Memory Usage')
-            axes[1, i].set_xlabel('Time (s)')
-            axes[1, i].set_ylabel('Memory Usage (%)')
-            axes[1, i].grid(True)
+        axes[1, i].plot(metrics['timestamps'], metrics['memory_usage'], label='Memory %', color='red')
+        axes[1, i].set_title(f'Spark {operation.capitalize()} - Memory Usage')
+        axes[1, i].set_xlabel('Time (s)')
+        axes[1, i].set_ylabel('Memory Usage (%)')
+        axes[1, i].grid(True)
     
     plt.tight_layout()
     plt.savefig(f"{output_dir}/spark_metrics.png", dpi=300, bbox_inches='tight')
@@ -428,45 +291,19 @@ def main():
 
     # Test Spark pipeline
     print("\n--- Spark Pipeline ---")
-    # spark_results = test_spark_pipeline(args.data_path, config, extra_confs={}) #grid
-    spark_results = test_spark_pipeline_enhanced(args.data_path, config)
+    spark_results = test_spark_pipeline(args.data_path, config, extra_confs={}) #grid
     
-    # Debug: Print spark_results structure
-    print(f"Spark results keys: {list(spark_results.keys())}")
     
-    # Test pandas pipeline
-    print("\n--- Pandas Pipeline ---")
-    pandas_results = test_pandas_pipeline(args.data_path, config)
     
     # Print results
-    print("\n=== Results Summary ===")
-    print("Pandas Pipeline:")
-    print(f"  Fit time: {pandas_results['fit_time']:.2f} seconds")
-    print(f"  Transform time: {pandas_results['transform_time']:.2f} seconds")
-    print(f"  Inverse time: {pandas_results['inverse_time']:.2f} seconds")
-    print(f"  Total time: {pandas_results['fit_time'] + pandas_results['transform_time'] + pandas_results['inverse_time']:.2f} seconds")
-    
+   
     print("\nSpark Pipeline:")
     print(f"  Fit time: {spark_results['fit_time']:.2f} seconds")
     print(f"  Transform time: {spark_results['transform_time']:.2f} seconds")
     print(f"  Inverse time: {spark_results['inverse_time']:.2f} seconds")
     print(f"  Total time: {spark_results['fit_time'] + spark_results['transform_time'] + spark_results['inverse_time']:.2f} seconds")
     
-    # Plot metrics
-    plot_metrics(pandas_results, spark_results, args.output_dir)
     
-    # Save results to file
-    results = {
-        'system_specs': specs,
-        'pandas_results': pandas_results,
-        'spark_results': spark_results
-    }
-    
-    import json
-    with open(f"{args.output_dir}/performance_results.json", "w") as f:
-        json.dump(results, f, indent=2, default=str)
-    
-    print(f"\nResults saved to {args.output_dir}/")
 
 
 if __name__ == "__main__":
