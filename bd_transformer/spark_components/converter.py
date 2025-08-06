@@ -116,8 +116,6 @@ class SparkConverter:
         if self._type == str:
             data = string_to_numbers_spark(data, self._column_name, self._prefix, self._suffix)
         
-        # Cache data for multiple aggregations
-        data = data.cache()
         
         if isinstance(self._min_val, bool) and self._min_val:
             min_result = data.agg({self._column_name: "min"}).first()
@@ -144,8 +142,6 @@ class SparkConverter:
         elif isinstance(self._max_val, bool) and not self._max_val:
             self._max_val = float('inf')
         
-        # Unpersist cached data
-        data.unpersist()
         return self
 
     def convert(self, data: DataFrame) -> DataFrame:

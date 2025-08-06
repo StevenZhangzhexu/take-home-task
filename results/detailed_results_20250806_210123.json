@@ -1,10 +1,5 @@
 {
-  "system_specs": {
-    "total_memory_gb": 8.0,
-    "available_memory_gb": 0.33968353271484375,
-    "cpu_count": 8,
-    "cpu_freq_mhz": 2400
-  },
+  "timestamp": "20250806_210123",
   "pandas_results": {
     "fit_time": 36.014328956604004,
     "transform_time": 20.29479694366455,
@@ -1450,5 +1445,10 @@
       }
     },
     "spark_ui_url": "http://172.32.249.242:4040"
+  },
+  "summary": {
+    "pandas_total_time": 130.02116775512695,
+    "spark_total_time": 54.67668128013611,
+    "speedup": 2.378000359768787
   }
 }
