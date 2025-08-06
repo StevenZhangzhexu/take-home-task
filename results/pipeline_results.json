@@ -1,0 +1,9 @@
+{
+  "fit_time": 21.97983407974243,
+  "transform_time": 0.7188549041748047,
+  "inverse_time": 0.6548140048980713,
+  "total_time": 23.353502988815308,
+  "transformed_count": 13400000,
+  "inversed_count": 13400000,
+  "success": true
+}

@@ -1,6 +1,6 @@
 {
   "application": {
-    "id": "local-1754489246572",
+    "id": "local-1754493684423",
     "name": "EnhancedPipelineTest",
     "ui_url": "http://10.131.0.245:4040",
     "executor_memory_used": 0,
@@ -16,6 +16,6 @@
     "default_parallelism": 200,
     "master": "local[*]",
     "app_name": "EnhancedPipelineTest",
-    "application_id": "local-1754489246572"
+    "application_id": "local-1754493684423"
   }
 }

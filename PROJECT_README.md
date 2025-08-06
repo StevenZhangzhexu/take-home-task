@@ -98,16 +98,16 @@ then trigger task from Airflow UI
    ```
    === Results Summary ===
    Pandas Pipeline:
-   Fit time: 36.01 seconds
-   Transform time: 20.29 seconds
-   Inverse time: 73.71 seconds
-   Total time: 130.02 seconds
+   Fit time: 54.05 seconds
+   Transform time: 31.22 seconds
+   Inverse time: 123.77 seconds
+   Total time: 209.05 seconds
 
    Spark Pipeline:
-   Fit time: 23.90 seconds
-   Transform time: 15.64 seconds
-   Inverse time: 15.14 seconds
-   Total time: 54.68 seconds
+   Fit time: 26.07 seconds
+   Transform time: 1.28 seconds
+   Inverse time: 1.20 seconds
+   Total time: 28.55 seconds
    ```
 4. **Resource Monitoring & Visualization**: CPU, memory, and disk I/O usage over time and Performance plots saved to `results/` directory
 
@@ -141,7 +141,7 @@ WIP
 
 
 ## Troubleshooting
-### Airflow - WIP
+### Airflow 
 Error Log
    ```
    Log message source details: sources=["/Users/zhangzhexu/airflow/logs/dag_id=spark_pipeline_with_monitoring/run_id=manual__2025-08-06T10:37:32.085486+00:00/task_id=run_spark_pipeline/attempt=1.log"]
@@ -149,16 +149,34 @@ Error Log
 [2025-08-06, 18:37:41] ERROR - Process terminated by signal: signal=-10: signal_name="SIGBUS": source="task"
    ```
 
+* Issue:
+The Airflow task crashes immediately with an OS signal SIGBUS (signal -10), abruptly terminating the Python subprocess. A Bus Error indicates an invalid memory access. Notably, this error occurs before any Python code in the task actually starts executing.
 
+* Potential Fix
+Since it's an environmental or hardware-level problems, not application bugs. A clean, isolated Python environment or containerized Airflow deployment could fix it.
 
-## Development
+## Challenges and Solution
+### 1. Spark Performance Issue
+- **Problem:**  
+  Initial implementation translated the `fit()` method column-by-column from pandas to Spark directly. Each `fit()` invocation spawned multiple Spark subtasks, causing significant overhead and inefficiency. 
+- **Solution:**  
+  Adopt vectorized processing by combining multiple columns and passing them to a single Spark job. This approach leverages Spark’s distributed data processing efficiently, reducing overhead and improving performance. (fit time dropped from 120+ sec to 30+ sec)
 
-### Adding New Columns
+### 2. Accuracy Issues Post-Optimization
+- **Problem:**  
+  After applying vectorized processing, some accuracy problems emerged due to complex input formats.
+- **Solution:**  
+  Use regular expressions (regex) to extract numeric values before applying the MinMax transform, which improved accuracy in handling complex data formats. (value difference dropped to <0.01)
 
-1. **Update config.yaml** with new column configuration
-2. **Test with small dataset** using `compare_pipelines.py`
-3. **Update Airflow DAG** if needed for new columns
-4. **Run performance tests** to ensure scalability
+### 3. Remaining Minor Differences
+- **Observation:**  
+  While the solution after step 2 became both efficient and more accurate, small differences (< 0.01) persisted compared to the original implementation.
+- **Solution:**  
+  Parallelize the `fit()` operation column-by-column using Airflow for orchestration. This enables local execution and achieves very high accuracy, effectively closing the accuracy gap.
+
+### 4. Next Step : Addressing Airflow Deployment Issues
+- Further work is ongoing to resolve challenges related to deploying this parallelized processing workflow on Airflow.
+
 
 
 
