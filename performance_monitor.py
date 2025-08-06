@@ -118,6 +118,236 @@ class RealTimeMonitor:
             time.sleep(self.sample_interval)
 
 
+class SparkParallelMonitor:
+    """
+    Enhanced monitor designed to work in parallel with Spark operations.
+    Handles the vectorized nature of Spark processing and provides
+    Spark-specific optimizations.
+    """
+    
+    def __init__(self, output_dir: str = "monitoring_results", sample_interval: float = 0.5):
+        self.output_dir = output_dir
+        self.sample_interval = sample_interval
+        self.monitoring = False
+        self.monitor_thread = None
+        self.start_time = None
+        
+        # Separate metrics for different aspects
+        self.system_metrics = {
+            'timestamps': [],
+            'cpu_usage': [],
+            'memory_usage': [],
+            'disk_io': [],
+            'network_io': []
+        }
+        
+        self.spark_metrics = {
+            'timestamps': [],
+            'executor_metrics': [],
+            'stage_metrics': [],
+            'memory_metrics': []
+        }
+        
+        self.pipeline_phases = {
+            'fit': {'start': None, 'end': None, 'duration': None},
+            'transform': {'start': None, 'end': None, 'duration': None},
+            'inverse_transform': {'start': None, 'end': None, 'duration': None}
+        }
+        
+        os.makedirs(output_dir, exist_ok=True)
+        
+    def start_monitoring(self):
+        """Start parallel monitoring."""
+        self.monitoring = True
+        self.start_time = time.time()
+        self.monitor_thread = threading.Thread(target=self._monitor_loop)
+        self.monitor_thread.daemon = True
+        self.monitor_thread.start()
+        print(f"Started Spark parallel monitoring. Results will be saved to {self.output_dir}")
+        
+    def stop_monitoring(self):
+        """Stop monitoring and save all metrics."""
+        self.monitoring = False
+        if self.monitor_thread:
+            self.monitor_thread.join()
+        
+        # Save all metrics
+        self._save_metrics()
+        print(f"Spark parallel monitoring stopped. Results saved to {self.output_dir}")
+        
+    def mark_phase_start(self, phase: str):
+        """Mark the start of a pipeline phase."""
+        if phase in self.pipeline_phases:
+            self.pipeline_phases[phase]['start'] = time.time() - self.start_time
+            print(f"Phase '{phase}' started at {self.pipeline_phases[phase]['start']:.2f}s")
+            
+    def mark_phase_end(self, phase: str):
+        """Mark the end of a pipeline phase."""
+        if phase in self.pipeline_phases:
+            self.pipeline_phases[phase]['end'] = time.time() - self.start_time
+            self.pipeline_phases[phase]['duration'] = (
+                self.pipeline_phases[phase]['end'] - self.pipeline_phases[phase]['start']
+            )
+            print(f"Phase '{phase}' completed in {self.pipeline_phases[phase]['duration']:.2f}s")
+    
+    def _monitor_loop(self):
+        """Enhanced monitoring loop optimized for Spark operations."""
+        last_disk_io = psutil.disk_io_counters()
+        last_net_io = psutil.net_io_counters()
+        last_time = time.time()
+        
+        while self.monitoring:
+            current_time = time.time()
+            elapsed_time = current_time - self.start_time
+            
+            # System metrics (optimized for Spark workloads)
+            cpu_percent = psutil.cpu_percent(interval=None)  # Non-blocking
+            memory_info = psutil.virtual_memory()
+            
+            # Enhanced disk I/O monitoring for Spark shuffle operations
+            try:
+                current_disk_io = psutil.disk_io_counters()
+                if last_disk_io:
+                    time_diff = current_time - last_time
+                    disk_read_rate = (current_disk_io.read_bytes - last_disk_io.read_bytes) / time_diff / 1024 / 1024
+                    disk_write_rate = (current_disk_io.write_bytes - last_disk_io.write_bytes) / time_diff / 1024 / 1024
+                    disk_io_total = disk_read_rate + disk_write_rate
+                else:
+                    disk_io_total = 0
+                last_disk_io = current_disk_io
+            except:
+                disk_io_total = 0
+            
+            # Network I/O monitoring for Spark cluster communication
+            try:
+                current_net_io = psutil.net_io_counters()
+                if last_net_io:
+                    time_diff = current_time - last_time
+                    net_sent_rate = (current_net_io.bytes_sent - last_net_io.bytes_sent) / time_diff / 1024 / 1024
+                    net_recv_rate = (current_net_io.bytes_recv - last_net_io.bytes_recv) / time_diff / 1024 / 1024
+                    net_io_total = net_sent_rate + net_recv_rate
+                else:
+                    net_io_total = 0
+                last_net_io = current_net_io
+            except:
+                net_io_total = 0
+            
+            # Store system metrics
+            self.system_metrics['timestamps'].append(elapsed_time)
+            self.system_metrics['cpu_usage'].append(cpu_percent)
+            self.system_metrics['memory_usage'].append(memory_info.percent)
+            self.system_metrics['disk_io'].append(disk_io_total)
+            self.system_metrics['network_io'].append(net_io_total)
+            
+            # Spark-specific metrics (if Spark context is available)
+            self._collect_spark_metrics(elapsed_time)
+            
+            last_time = current_time
+            time.sleep(self.sample_interval)
+    
+    def _collect_spark_metrics(self, elapsed_time: float):
+        """Collect Spark-specific metrics if available."""
+        try:
+            # Try to get Spark context from global scope
+            import pyspark
+            spark_context = None
+            
+            # This is a simplified approach - in practice, you'd pass the Spark session
+            # to the monitor or use a different mechanism to access it
+            if hasattr(pyspark, '_sc') and pyspark._sc:
+                spark_context = pyspark._sc
+            elif 'spark' in globals():
+                spark_context = globals()['spark'].sparkContext
+                
+            if spark_context:
+                # Collect basic Spark metrics
+                spark_metrics = {
+                    'timestamp': elapsed_time,
+                    'application_id': spark_context.applicationId,
+                    'default_parallelism': spark_context.defaultParallelism,
+                    'master': spark_context.master
+                }
+                
+                self.spark_metrics['timestamps'].append(elapsed_time)
+                self.spark_metrics['executor_metrics'].append(spark_metrics)
+                
+        except Exception as e:
+            # Spark context not available, skip Spark metrics
+            pass
+    
+    def _save_metrics(self):
+        """Save all collected metrics to files."""
+        # Save system metrics
+        system_file = os.path.join(self.output_dir, "system_metrics.json")
+        with open(system_file, 'w') as f:
+            json.dump(self.system_metrics, f, indent=2)
+        
+        # Save Spark metrics
+        spark_file = os.path.join(self.output_dir, "spark_metrics.json")
+        with open(spark_file, 'w') as f:
+            json.dump(self.spark_metrics, f, indent=2)
+        
+        # Save pipeline phases
+        phases_file = os.path.join(self.output_dir, "pipeline_phases.json")
+        with open(phases_file, 'w') as f:
+            json.dump(self.pipeline_phases, f, indent=2)
+        
+        # Create summary report
+        self._create_summary_report()
+    
+    def _create_summary_report(self):
+        """Create a summary report of the monitoring session."""
+        summary = {
+            'monitoring_duration': time.time() - self.start_time,
+            'total_samples': len(self.system_metrics['timestamps']),
+            'pipeline_phases': self.pipeline_phases,
+            'system_summary': self._calculate_system_summary(),
+            'spark_summary': self._calculate_spark_summary()
+        }
+        
+        summary_file = os.path.join(self.output_dir, "monitoring_summary.json")
+        with open(summary_file, 'w') as f:
+            json.dump(summary, f, indent=2)
+    
+    def _calculate_system_summary(self):
+        """Calculate summary statistics for system metrics."""
+        if not self.system_metrics['cpu_usage']:
+            return {}
+        
+        return {
+            'cpu': {
+                'avg_usage': sum(self.system_metrics['cpu_usage']) / len(self.system_metrics['cpu_usage']),
+                'max_usage': max(self.system_metrics['cpu_usage']),
+                'min_usage': min(self.system_metrics['cpu_usage'])
+            },
+            'memory': {
+                'avg_usage': sum(self.system_metrics['memory_usage']) / len(self.system_metrics['memory_usage']),
+                'max_usage': max(self.system_metrics['memory_usage']),
+                'min_usage': min(self.system_metrics['memory_usage'])
+            },
+            'disk_io': {
+                'avg_rate': sum(self.system_metrics['disk_io']) / len(self.system_metrics['disk_io']),
+                'max_rate': max(self.system_metrics['disk_io']),
+                'total_io': sum(self.system_metrics['disk_io']) * self.sample_interval
+            },
+            'network_io': {
+                'avg_rate': sum(self.system_metrics['network_io']) / len(self.system_metrics['network_io']),
+                'max_rate': max(self.system_metrics['network_io']),
+                'total_io': sum(self.system_metrics['network_io']) * self.sample_interval
+            }
+        }
+    
+    def _calculate_spark_summary(self):
+        """Calculate summary statistics for Spark metrics."""
+        if not self.spark_metrics['executor_metrics']:
+            return {}
+        
+        return {
+            'total_spark_metrics': len(self.spark_metrics['executor_metrics']),
+            'application_id': self.spark_metrics['executor_metrics'][0].get('application_id', 'unknown') if self.spark_metrics['executor_metrics'] else 'unknown'
+        }
+
+
 class SparkMetricsCollector:
     """Collect metrics from Spark UI."""
     

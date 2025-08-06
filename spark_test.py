@@ -272,7 +272,7 @@ def plot_metrics(pandas_results, spark_results, output_dir="results"):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_path", type=str, required=True)
+    parser.add_argument("--data_path", type=str, default="data/large/")
     parser.add_argument("--config_path", type=str, default="config.yaml")
     parser.add_argument("--output_dir", type=str, default="results")
     #parser.add_argument("--conf", action="append", help="Extra Spark config in key=value format") #grid
