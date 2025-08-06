@@ -161,6 +161,8 @@ def test_spark_pipeline_enhanced(data_path: str, config: dict, output_dir: str =
         .config("spark.default.parallelism", 200)
         .config("spark.sql.shuffle.partitions", 120)
         .config("spark.driver.memory", "4g")
+        .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+        .config("spark.kryoserializer.buffer", "64k")
         .config("spark.kryoserializer.buffer.max", "512m")
         .config("spark.sql.adaptive.enabled", "true")
         .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
@@ -314,81 +316,107 @@ def test_spark_pipeline_enhanced(data_path: str, config: dict, output_dir: str =
 
 
 def plot_metrics(pandas_results, spark_results, output_dir="results"):
-    """Plot resource usage metrics with real processing times."""
+    """Plot resource usage metrics including CPU, Memory, and Disk I/O."""
     os.makedirs(output_dir, exist_ok=True)
     
-    # Create subplots for CPU and Memory usage
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    # Create subplots for CPU, Memory, and Disk I/O usage
+    fig, axes = plt.subplots(3, 3, figsize=(15, 15))
     
-    # Pandas metrics
+    # --- Plot Pandas Metrics ---
     for i, (operation, metrics) in enumerate([('fit', pandas_results.get('fit_metrics', {})), 
                                             ('transform', pandas_results.get('transform_metrics', {})), 
                                             ('inverse', pandas_results.get('inverse_metrics', {}))]):
-        if metrics and 'timestamps' in metrics and 'cpu_usage' in metrics and len(metrics['timestamps']) > 0:
-            # Use actual processing time for x-axis
-            actual_time = pandas_results.get(f'{operation}_time', 0)
-            if actual_time > 0:
-                # Normalize timestamps to actual processing time - start from 0
-                max_timestamp = max(metrics['timestamps'])
-                if max_timestamp > 0:
-                    # Scale timestamps to match actual processing time, starting from 0
-                    normalized_timestamps = [(t / max_timestamp) * actual_time for t in metrics['timestamps']]
-                    axes[0, i].plot(normalized_timestamps, metrics['cpu_usage'], label='CPU %', color='blue')
-                    axes[0, i].set_title(f'Pandas {operation.capitalize()} - CPU Usage ({actual_time:.1f}s)')
-                    axes[0, i].set_xlabel('Time (s)')
-                    axes[0, i].set_ylabel('CPU Usage (%)')
-                    axes[0, i].grid(True)
-                    axes[0, i].set_xlim(0, actual_time)  # Set x-axis from 0 to actual time
+        
+        actual_time = pandas_results.get(f'{operation}_time', 0)
+        
+        if not (metrics and 'timestamps' in metrics and len(metrics['timestamps']) > 0 and actual_time > 0):
+            continue
+
+        max_timestamp = max(metrics['timestamps'])
+        if max_timestamp <= 0:
+            continue
             
-            if metrics and 'timestamps' in metrics and 'memory_usage' in metrics and len(metrics['timestamps']) > 0:
-                max_timestamp = max(metrics['timestamps'])
-                if max_timestamp > 0:
-                    normalized_timestamps = [(t / max_timestamp) * actual_time for t in metrics['timestamps']]
-                    axes[1, i].plot(normalized_timestamps, metrics['memory_usage'], label='Memory %', color='red')
-                    axes[1, i].set_title(f'Pandas {operation.capitalize()} - Memory Usage ({actual_time:.1f}s)')
-                    axes[1, i].set_xlabel('Time (s)')
-                    axes[1, i].set_ylabel('Memory Usage (%)')
-                    axes[1, i].grid(True)
-                    axes[1, i].set_xlim(0, actual_time)  # Set x-axis from 0 to actual time
-    
-    plt.tight_layout()
+        normalized_timestamps = [(t / max_timestamp) * actual_time for t in metrics['timestamps']]
+
+        # Plot CPU Usage
+        if 'cpu_usage' in metrics and len(metrics['cpu_usage']) > 0:
+            axes[0, i].plot(normalized_timestamps, metrics['cpu_usage'], label='CPU %', color='blue')
+            axes[0, i].set_title(f'Pandas {operation.capitalize()} - CPU Usage ({actual_time:.1f}s)')
+            axes[0, i].set_xlabel('Time (s)')
+            axes[0, i].set_ylabel('CPU Usage (%)')
+            axes[0, i].grid(True)
+            axes[0, i].set_xlim(0, actual_time)
+        
+        # Plot Memory Usage
+        if 'memory_usage' in metrics and len(metrics['memory_usage']) > 0:
+            axes[1, i].plot(normalized_timestamps, metrics['memory_usage'], label='Memory %', color='red')
+            axes[1, i].set_title(f'Pandas {operation.capitalize()} - Memory Usage ({actual_time:.1f}s)')
+            axes[1, i].set_xlabel('Time (s)')
+            axes[1, i].set_ylabel('Memory Usage (%)')
+            axes[1, i].grid(True)
+            axes[1, i].set_xlim(0, actual_time)
+            
+        # Plot Disk I/O
+        if 'disk_io' in metrics and len(metrics['disk_io']) > 0:
+            axes[2, i].plot(normalized_timestamps, metrics['disk_io'], label='Disk I/O (MB/s)', color='green')
+            axes[2, i].set_title(f'Pandas {operation.capitalize()} - Disk I/O ({actual_time:.1f}s)')
+            axes[2, i].set_xlabel('Time (s)')
+            axes[2, i].set_ylabel('Disk I/O (MB/s)')
+            axes[2, i].grid(True)
+            axes[2, i].set_xlim(0, actual_time)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.suptitle('Pandas Performance Metrics', fontsize=16)
     plt.savefig(f"{output_dir}/pandas_metrics.png", dpi=300, bbox_inches='tight')
     plt.close()
     
-    # Spark metrics
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    # --- Plot Spark Metrics ---
+    fig, axes = plt.subplots(3, 3, figsize=(15, 15))
     
     for i, (operation, metrics) in enumerate([('fit', spark_results.get('fit_metrics', {})), 
                                             ('transform', spark_results.get('transform_metrics', {})), 
                                             ('inverse', spark_results.get('inverse_metrics', {}))]):
-        if metrics and 'timestamps' in metrics and 'cpu_usage' in metrics and len(metrics['timestamps']) > 0:
-            # Use actual processing time for x-axis
-            actual_time = spark_results.get(f'{operation}_time', 0)
-            if actual_time > 0:
-                # Normalize timestamps to actual processing time - start from 0
-                max_timestamp = max(metrics['timestamps'])
-                if max_timestamp > 0:
-                    # Scale timestamps to match actual processing time, starting from 0
-                    normalized_timestamps = [(t / max_timestamp) * actual_time for t in metrics['timestamps']]
-                    axes[0, i].plot(normalized_timestamps, metrics['cpu_usage'], label='CPU %', color='blue')
-                    axes[0, i].set_title(f'Spark {operation.capitalize()} - CPU Usage ({actual_time:.1f}s)')
-                    axes[0, i].set_xlabel('Time (s)')
-                    axes[0, i].set_ylabel('CPU Usage (%)')
-                    axes[0, i].grid(True)
-                    axes[0, i].set_xlim(0, actual_time)  # Set x-axis from 0 to actual time
+        
+        actual_time = spark_results.get(f'{operation}_time', 0)
+
+        if not (metrics and 'timestamps' in metrics and len(metrics['timestamps']) > 0 and actual_time > 0):
+            continue
+        
+        max_timestamp = max(metrics['timestamps'])
+        if max_timestamp <= 0:
+            continue
             
-            if metrics and 'timestamps' in metrics and 'memory_usage' in metrics and len(metrics['timestamps']) > 0:
-                max_timestamp = max(metrics['timestamps'])
-                if max_timestamp > 0:
-                    normalized_timestamps = [(t / max_timestamp) * actual_time for t in metrics['timestamps']]
-                    axes[1, i].plot(normalized_timestamps, metrics['memory_usage'], label='Memory %', color='red')
-                    axes[1, i].set_title(f'Spark {operation.capitalize()} - Memory Usage ({actual_time:.1f}s)')
-                    axes[1, i].set_xlabel('Time (s)')
-                    axes[1, i].set_ylabel('Memory Usage (%)')
-                    axes[1, i].grid(True)
-                    axes[1, i].set_xlim(0, actual_time)  # Set x-axis from 0 to actual time
+        normalized_timestamps = [(t / max_timestamp) * actual_time for t in metrics['timestamps']]
+
+        # Plot CPU Usage
+        if 'cpu_usage' in metrics and len(metrics['cpu_usage']) > 0:
+            axes[0, i].plot(normalized_timestamps, metrics['cpu_usage'], label='CPU %', color='blue')
+            axes[0, i].set_title(f'Spark {operation.capitalize()} - CPU Usage ({actual_time:.1f}s)')
+            axes[0, i].set_xlabel('Time (s)')
+            axes[0, i].set_ylabel('CPU Usage (%)')
+            axes[0, i].grid(True)
+            axes[0, i].set_xlim(0, actual_time)
+        
+        # Plot Memory Usage
+        if 'memory_usage' in metrics and len(metrics['memory_usage']) > 0:
+            axes[1, i].plot(normalized_timestamps, metrics['memory_usage'], label='Memory %', color='red')
+            axes[1, i].set_title(f'Spark {operation.capitalize()} - Memory Usage ({actual_time:.1f}s)')
+            axes[1, i].set_xlabel('Time (s)')
+            axes[1, i].set_ylabel('Memory Usage (%)')
+            axes[1, i].grid(True)
+            axes[1, i].set_xlim(0, actual_time)
+
+        # Plot Disk I/O
+        if 'disk_io' in metrics and len(metrics['disk_io']) > 0:
+            axes[2, i].plot(normalized_timestamps, metrics['disk_io'], label='Disk I/O (MB/s)', color='green')
+            axes[2, i].set_title(f'Spark {operation.capitalize()} - Disk I/O ({actual_time:.1f}s)')
+            axes[2, i].set_xlabel('Time (s)')
+            axes[2, i].set_ylabel('Disk I/O (MB/s)')
+            axes[2, i].grid(True)
+            axes[2, i].set_xlim(0, actual_time)
     
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.suptitle('Spark Performance Metrics', fontsize=16)
     plt.savefig(f"{output_dir}/spark_metrics.png", dpi=300, bbox_inches='tight')
     plt.close()
     
@@ -602,4 +630,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()

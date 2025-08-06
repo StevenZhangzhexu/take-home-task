@@ -60,9 +60,9 @@ def test_spark_pipeline_enhanced(data_path: str, config: dict, output_dir: str =
         SparkSession.builder
         .master("local[*]")
         .appName("EnhancedPipelineTest")
-        .config("spark.default.parallelism", 200)
+        .config("spark.default.parallelism", 160)
         .config("spark.sql.shuffle.partitions", 120)
-        .config("spark.driver.memory", "4g")
+        .config("spark.driver.memory", "8g")
         # Kryo serializer settings
         .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
         .config("spark.kryoserializer.buffer", "64k")
